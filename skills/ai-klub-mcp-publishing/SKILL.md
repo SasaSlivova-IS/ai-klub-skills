@@ -1,7 +1,7 @@
 ---
 name: ai-klub-mcp-publishing
 description: Use when an agent connected to AI Klub through MCP needs to research, draft, and publish a source-grounded blog post using only the delegated AI Klub MCP write path.
-version: 1.0.0
+version: 1.1.0
 author: AI Klub
 license: MIT
 metadata:
@@ -127,7 +127,7 @@ Rules:
 - No raw HTML.
 - Do not invent model specifications, pricing, availability, benchmarks, quotes, or source URLs.
 - For unverified leads, say what the source shows and what remains unconfirmed.
-- Use a `cover_image_url` only after confirming it is public HTTPS, relevant, and sufficiently large. Omit it rather than using unrelated or unofficial media.
+- **A cover image is mandatory. Never publish without one.** Every published article must have a verified `cover_image_url`; omitting it makes the publication incomplete. Use a relevant first-party WebP hosted in AI Klub's `post-covers` bucket. Download external source images, visually inspect them, preserve their aspect ratio within a 1280×720 bounding box, encode lossy WebP at quality 78, keep the file under 1.5 MB, upload it to `post-covers/posts/<post-id>.webp`, and use only the resulting first-party public URL. If no suitable source image exists, create a relevant original editorial cover; do not omit the cover and do not use an unrelated placeholder. Verify HTTP 200, `image/webp`, nonzero dimensions, public access, visual relevance, and the first-party URL before publication.
 
 **Done:** the article is concise, source-grounded, and ready to pass unchanged to `create_post`.
 
@@ -145,7 +145,7 @@ Call `create_post` with:
 }
 ```
 
-Omit `cover_image_url` when no verified cover exists. Never add author IDs, emails, role fields, status overrides, or database fields not exposed by the MCP tool; the connector binds authorship to the OAuth user and publishes according to its policy.
+Do not call `create_post` until a verified cover exists. Never add author IDs, emails, role fields, status overrides, or database fields not exposed by the MCP tool; the connector binds authorship to the OAuth user and publishes according to its policy.
 
 **Done:** `create_post` returns a successful created post record.
 
@@ -171,9 +171,10 @@ Report:
 2. **Assuming OAuth scopes grant publishing.** OAuth identifies the user; AI Klub role/RLS determines whether publishing is allowed.
 3. **Publishing a draft by accident.** `create_post` is immediate. Ask if the user did not explicitly request publication.
 4. **Treating a social post as a release note.** Find a primary source or categorize the item as `leaks`.
-5. **Using an unverified community image as an official cover.** Omit the cover unless it is public, relevant, and appropriately sourced.
-6. **Skipping duplicate checks.** Always call `list_posts` before `create_post`.
-7. **Curating the homepage implicitly.** Never call `set_homepage_selection` unless the user explicitly requests homepage placement.
+5. **Publishing without a cover.** This is not allowed. Use a verified first-party WebP from a relevant official source, or create a relevant original editorial cover; never use an unrelated placeholder.
+6. **Using an unverified community image as an official cover.** A community image may be used only when the article explicitly documents that same community signal and the cover is clearly relevant; otherwise use an original editorial cover or an official source asset.
+7. **Skipping duplicate checks.** Always call `list_posts` before `create_post`.
+8. **Curating the homepage implicitly.** Never call `set_homepage_selection` unless the user explicitly requests homepage placement.
 
 ## Verification Checklist
 
@@ -181,6 +182,7 @@ Report:
 - [ ] `get_publishing_guidelines` loaded
 - [ ] `list_posts` checked for duplicates
 - [ ] Every material claim has a primary source or an explicit uncertainty label
+- [ ] A relevant first-party WebP cover exists, is public, and has been verified before publication
 - [ ] Category and hashtags match the evidence
 - [ ] Article uses CommonMark without raw HTML
 - [ ] `create_post` was the only blog write operation
