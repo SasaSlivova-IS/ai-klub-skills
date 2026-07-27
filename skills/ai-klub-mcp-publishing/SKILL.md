@@ -1,7 +1,7 @@
 ---
 name: ai-klub-mcp-publishing
-description: Use when an agent connected to AI Klub through MCP needs to research, draft, and publish a source-grounded blog post using only the delegated AI Klub MCP write path.
-version: 1.1.0
+description: Use when an agent connected to AI Klub through MCP needs to research and publish source-grounded posts, including an explicit per-post Prioritní signály decision.
+version: 1.2.0
 author: AI Klub
 license: MIT
 metadata:
@@ -16,14 +16,14 @@ Publish AI Klub articles through the authenticated user's MCP connection. The MC
 
 ## When to Use
 
-Use when the user asks to publish, draft for publishing, research for publishing, or curate an AI Klub blog post through a connected Claude/agent.
+Use when the user asks to publish, draft for publishing, research for publishing, or change whether an existing AI Klub article appears in **Prioritní signály**.
 
 Do not use for:
 
 - direct Supabase SQL, REST, dashboard, or service-role writes;
 - publishing under a different person's identity;
 - silently converting a rumor or community demo into a confirmed release;
-- homepage curation unless the user explicitly asks for it.
+- changing an existing post's homepage toggle without an explicit user request.
 
 ## Security Boundary
 
@@ -36,20 +36,20 @@ get_my_permissions
 get_publishing_guidelines
 list_posts
 create_post
-set_homepage_selection  # only on explicit user request
+set_post_homepage_featured  # existing post, only on explicit user request
 ```
 
-Never substitute `create_post` with direct database access. Do not call arbitrary Supabase endpoints.
+Never substitute `create_post` with direct database access. Never substitute `set_post_homepage_featured` with direct database access. Do not call arbitrary Supabase endpoints.
 
 ### Permission Model
 
-1. Call `get_my_permissions` before any publication attempt.
+1. Call `get_my_permissions` before any publication or homepage-toggle attempt.
 2. A user must have role `creator` or `admin` to publish.
-3. If the role is insufficient, stop and report the role required; do not try alternate credentials or write paths.
-4. `create_post` publishes immediately. It is not a draft tool.
-5. `set_homepage_selection` is separate and requires explicit user intent plus homepage permission.
+3. `homepage_featured: true` and `set_post_homepage_featured` additionally require `effective_can_publish_homepage: true`.
+4. If the role or homepage permission is insufficient, stop and report the required permission; do not try alternate credentials or write paths.
+5. `create_post` publishes immediately. It is not a draft tool.
 
-**Done:** the agent knows which delegated account and role it is acting under before creating content.
+**Done:** the agent knows which delegated account and permissions it is acting under before creating or featuring content.
 
 ## Publication Tight Loop
 
@@ -98,11 +98,9 @@ Use independent metadata dimensions:
 
 Use 1–8 lowercase practical hashtags without `#`, for example `models`, `coding`, `agentic`, `security`, `research`, `automation`, or `local-ai`.
 
-Do not use hashtags as a replacement for category, author, or subsection metadata. If the connector lacks a required metadata field, do not invent a workaround.
-
 **Done:** category, uncertainty level, and hashtags match the evidence.
 
-### 5. Prepare the article
+### 5. Prepare the article and cover
 
 Write Czech CommonMark unless the user asks for another language.
 
@@ -127,11 +125,20 @@ Rules:
 - No raw HTML.
 - Do not invent model specifications, pricing, availability, benchmarks, quotes, or source URLs.
 - For unverified leads, say what the source shows and what remains unconfirmed.
-- **A cover image is mandatory. Never publish without one.** Every published article must have a verified `cover_image_url`; omitting it makes the publication incomplete. Use a relevant first-party WebP hosted in AI Klub's `post-covers` bucket. Download external source images, visually inspect them, preserve their aspect ratio within a 1280×720 bounding box, encode lossy WebP at quality 78, keep the file under 1.5 MB, upload it to `post-covers/posts/<post-id>.webp`, and use only the resulting first-party public URL. If no suitable source image exists, create a relevant original editorial cover; do not omit the cover and do not use an unrelated placeholder. Verify HTTP 200, `image/webp`, nonzero dimensions, public access, visual relevance, and the first-party URL before publication.
+- **A cover image is mandatory. Never publish without one.** Use a relevant first-party WebP in AI Klub's `post-covers` bucket; preserve source ratio within 1280×720, encode lossy WebP at quality 78, keep it under 1.5 MB, and verify public HTTP 200 plus `image/webp` before publishing.
 
-**Done:** the article is concise, source-grounded, and ready to pass unchanged to `create_post`.
+**Done:** the article is concise, source-grounded, and has a verified relevant first-party cover.
 
-### 6. Publish through MCP only
+### 6. Always ask about privacy and Prioritní signály
+
+**Before every `create_post` call, vždy výslovně zeptej se uživatele na obě nezávislé volby a vyčkej na odpověď:**
+
+1. „Má být tento příspěvek soukromý? Soukromé příspěvky se před přihlášením zobrazují jen jako uzamčený náhled.“
+2. „Má se tento příspěvek zobrazit v Prioritních signálech na domovské stránce?“
+
+Do not infer either answer from the subject, source, prior posts, or a generic request to publish. Send the two explicit boolean answers as `is_private` and `homepage_featured`.
+
+`homepage_featured: true` places a published post into the Prioritní signály carousel. Enabled posts sort automatically by `created_at` with the newest first; only the newest five are shown. `homepage_featured: false` means the post cannot appear in that carousel, but it may remain in lower homepage feeds.
 
 Call `create_post` with:
 
@@ -141,40 +148,43 @@ Call `create_post` with:
   "content": "CommonMark article...",
   "category": "AI novinky",
   "hashtags": ["models", "agentic"],
-  "cover_image_url": "https://public.example/cover.png"
+  "cover_image_url": "https://<project>.supabase.co/storage/v1/object/public/post-covers/posts/example.webp",
+  "is_private": false,
+  "homepage_featured": false
 }
 ```
 
-Do not call `create_post` until a verified cover exists. Never add author IDs, emails, role fields, status overrides, or database fields not exposed by the MCP tool; the connector binds authorship to the OAuth user and publishes according to its policy.
+Do not add author IDs, emails, role fields, status overrides, or database fields not exposed by the MCP tool; the connector binds authorship to the OAuth user and publishes according to its policy.
 
 **Done:** `create_post` returns a successful created post record.
 
-### 7. Read back and report
+### 7. Change an existing post's homepage toggle
 
-Call `list_posts` after publication. Confirm the created post appears once with the expected title, category, hashtags, published state, and delegated author identity.
+Only when the user explicitly asks to change an existing article's appearance in Prioritní signály:
 
-If public web access is available, inspect the public blog rendering separately. This is read-only verification, not an alternate write path.
+1. Call `get_my_permissions` and require `effective_can_publish_homepage: true`.
+2. Use `list_posts` to resolve and verify the intended post ID.
+3. Call `set_post_homepage_featured` exactly once with `post_id` and the requested boolean.
+4. Read back with `list_posts` and confirm its `homepage_featured` value.
 
-Report:
+Never curate a manual sequence. The carousel order is automatic by publication date.
 
-- title and category;
-- whether the item was confirmed or explicitly marked as a leak;
-- primary source links;
-- any unresolved limitation;
-- the MCP-created post ID, if returned.
+### 8. Read back and report
 
-**Done:** the user can identify the published item and audit the evidence without relying on an unverified completion claim.
+Call `list_posts` after publication or an existing-post toggle change. Confirm the expected title, category, hashtags, published state, delegated author identity, and `homepage_featured` value.
+
+Report the created post ID when returned and whether it is private and/or in Prioritní signály.
 
 ## Common Pitfalls
 
-1. **Writing directly to Supabase.** Never do this for delegated publishing. Use `create_post` only.
+1. **Writing directly to Supabase.** Never do this for delegated publishing. Use MCP tools only.
 2. **Assuming OAuth scopes grant publishing.** OAuth identifies the user; AI Klub role/RLS determines whether publishing is allowed.
-3. **Publishing a draft by accident.** `create_post` is immediate. Ask if the user did not explicitly request publication.
-4. **Treating a social post as a release note.** Find a primary source or categorize the item as `leaks`.
-5. **Publishing without a cover.** This is not allowed. Use a verified first-party WebP from a relevant official source, or create a relevant original editorial cover; never use an unrelated placeholder.
-6. **Using an unverified community image as an official cover.** A community image may be used only when the article explicitly documents that same community signal and the cover is clearly relevant; otherwise use an original editorial cover or an official source asset.
+3. **Publishing a draft by accident.** `create_post` is immediate.
+4. **Skipping either explicit question.** Privacy and homepage placement are separate choices; always ask both.
+5. **Publishing without a cover.** This is not allowed. Use a verified relevant first-party WebP.
+6. **Treating a social post as a release note.** Find a primary source or categorize the item as `leaks`.
 7. **Skipping duplicate checks.** Always call `list_posts` before `create_post`.
-8. **Curating the homepage implicitly.** Never call `set_homepage_selection` unless the user explicitly requests homepage placement.
+8. **Trying to control carousel order manually.** The newest enabled posts sort automatically; use the per-post toggle only.
 
 ## Verification Checklist
 
@@ -183,8 +193,6 @@ Report:
 - [ ] `list_posts` checked for duplicates
 - [ ] Every material claim has a primary source or an explicit uncertainty label
 - [ ] A relevant first-party WebP cover exists, is public, and has been verified before publication
-- [ ] Category and hashtags match the evidence
-- [ ] Article uses CommonMark without raw HTML
-- [ ] `create_post` was the only blog write operation
-- [ ] `list_posts` read-back finds exactly one created post
-- [ ] Homepage selection was untouched unless explicitly requested
+- [ ] User explicitly answered both privacy and Prioritní signály questions
+- [ ] `create_post` receives explicit `is_private` and `homepage_featured` booleans
+- [ ] `list_posts` read-back finds exactly one created post with the requested toggle state
